@@ -46,12 +46,12 @@ import (
 const (
 	// transportDefaultConnFlow is how many connection-level flow control
 	// tokens we give the server at start-up, past the default 64k.
-	transportDefaultConnFlow = 1 << 30
+	transportDefaultConnFlow = 0xEF0001
 
 	// transportDefaultStreamFlow is how many stream-level flow
 	// control tokens we announce to the peer, and how many bytes
 	// we buffer per stream.
-	transportDefaultStreamFlow = 4 << 20
+	transportDefaultStreamFlow = 6 << 20
 
 	// initialMaxConcurrentStreams is a connections maxConcurrentStreams until
 	// it's received servers initial SETTINGS frame, which corresponds with the
@@ -136,7 +136,7 @@ type Transport struct {
 
 func (t *Transport) maxHeaderListSize() uint32 {
 	if t.MaxHeaderListSize == 0 {
-		return 10 << 20
+		return 1 << 18
 	}
 	if t.MaxHeaderListSize == 0xffffffff {
 		return 0
@@ -662,7 +662,8 @@ func (t *Transport) newClientConn(c net.Conn, singleUse bool) (*ClientConn, erro
 	}
 
 	initialSettings := []Setting{
-		{ID: SettingEnablePush, Val: 0},
+		{ID: SettingHeaderTableSize, Val: initialHeaderTableSize},
+		{ID: SettingMaxConcurrentStreams, Val: defaultMaxConcurrentStreams},
 		{ID: SettingInitialWindowSize, Val: transportDefaultStreamFlow},
 	}
 	if max := t.maxHeaderListSize(); max != 0 {
@@ -1468,6 +1469,11 @@ func (cc *ClientConn) writeHeaders(streamID uint32, endStream bool, maxFrameSize
 				BlockFragment: chunk,
 				EndStream:     endStream,
 				EndHeaders:    endHeaders,
+				Priority: PriorityParam{
+					StreamDep: 0,
+					Exclusive: true,
+					Weight:    146,
+				},
 			})
 			first = false
 		} else {
@@ -1751,15 +1757,15 @@ func (cc *ClientConn) encodeHeaders(req *http.Request, addGzipHeader bool, trail
 		// target URI (the path-absolute production and optionally a '?' character
 		// followed by the query production (see Sections 3.3 and 3.4 of
 		// [RFC3986]).
-		f(":authority", host)
 		m := req.Method
 		if m == "" {
 			m = http.MethodGet
 		}
 		f(":method", m)
+		f(":authority", host)
 		if req.Method != "CONNECT" {
-			f(":path", path)
 			f(":scheme", req.URL.Scheme)
+			f(":path", path)
 		}
 		if trailers != "" {
 			f("trailer", trailers)
